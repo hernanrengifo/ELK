@@ -1,0 +1,23 @@
+# entorno
+.venv/
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# artefactos de ejecución (los regenera cualquier corrida; los limpia
+# scripts/demo_reset.sh)
+audit.jsonl
+trace.jsonl
+observability/traces/*.jsonl
+.demo_smoke_agent_b.log
+.referencia_agent_b.log
+.logs/
+.cache/
+
+# `traces/*.jsonl` (trazas de referencia) y `docs/screenshots/*.png` SÍ
+# se versionan: son el plan B de la demo y la documentación de la UI.
+
+# trazas de corridas con modelo real (ruido local, no del repo)
+.trazas-reales/

@@ -1,0 +1,107 @@
+# ontology.yaml — modelo de datos de la demo EKL (plan_demo.md §3.1, §3.2)
+#
+# No agregar tipos de nodo, aristas o acciones que no estén en el plan.
+
+nodos:
+  - tipo: Cliente
+    bian_service_domain: "Party / Customer Reference Data Management"
+    propiedades_clave: [id, nombre, segmento, sensibilidad]
+    grafo: negocio
+
+  - tipo: Producto
+    bian_service_domain: "Product Directory / Loans & Deposits"
+    propiedades_clave: [id, nombre, tipo]
+    grafo: negocio
+
+  - tipo: Cuenta
+    bian_service_domain: "Current Account / Customer Position"
+    propiedades_clave: [id, moneda]
+    grafo: negocio
+
+  - tipo: Servicio
+    bian_service_domain: "(frontera)"
+    propiedades_clave: [id, nombre, "dominio_owner: infra"]
+    grafo: ambos   # referencia (id, nombre, dominio_owner) en negocio; completo en infra
+
+  - tipo: BaseDatos
+    bian_service_domain: "— (infra)"
+    propiedades_clave: [id, motor, ambiente]
+    grafo: infra
+
+  - tipo: Persona
+    bian_service_domain: "— (nodo de experiencia)"
+    propiedades_clave: [id, nombre, rol, contacto]
+    grafo: infra
+
+  - tipo: Cambio
+    bian_service_domain: "— (infra)"
+    propiedades_clave: [id, descripcion, fecha, ventana]
+    grafo: infra
+
+  - tipo: Metrica
+    bian_service_domain: "(capa semántica)"
+    propiedades_clave: [nombre, definicion, owner, version]
+    grafo: negocio
+
+  - tipo: Accion
+    bian_service_domain: "(capa semántica / gobernanza)"
+    propiedades_clave: [nombre, expuesta_por, contrato, backend, politica]
+    grafo: negocio   # los nodos Accion de esta demo son expuestos por Cliente
+
+aristas:
+  - nombre: TIENE
+    de: Cliente
+    a: Producto
+    grafo: negocio
+
+  - nombre: SE_LIQUIDA_EN
+    de: Producto
+    a: Cuenta
+    grafo: negocio
+
+  - nombre: SE_EJECUTA_EN
+    de: Producto
+    a: Servicio
+    grafo: negocio   # apunta al nodo Servicio de referencia en negocio
+
+  - nombre: DEPENDE_DE
+    de: [Servicio]
+    a: [BaseDatos, Servicio]
+    grafo: infra
+
+  - nombre: ES_RESPONSABLE
+    de: Servicio
+    a: Persona
+    grafo: infra
+
+  - nombre: AFECTA
+    de: Cambio
+    a: BaseDatos
+    grafo: infra
+
+  - nombre: EXPONE_ACCION
+    de: [Servicio, Cliente]
+    a: Accion
+    grafo: negocio   # en esta demo, expuesta por Cliente (ver acciones más abajo)
+
+# --- 3.2 Nodos accionables ---------------------------------------------
+#
+# El agente descubre la acción navegando el grafo (list_node_actions),
+# nunca la conoce de antemano. El campo `backend` NO se expone al agente;
+# lo resuelve el MCP server (ekl_actions_server, sesión 2).
+
+acciones:
+  - nombre: retrieve_customer_position
+    expuesta_por: Cliente
+    contrato:
+      entrada:
+        customer_ref: string
+        metrica: string
+      salida:
+        valor: number
+        moneda: string
+        fecha_corte: date
+        linaje: string
+    backend: "mcp://ekl-actions/retrieve_customer_position"
+    politica:
+      requiere_rol: [riesgo, direccion]

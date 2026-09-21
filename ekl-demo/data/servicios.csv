@@ -1,0 +1,6 @@
+id,nombre,dominio_owner
+pagos-core,Pagos Core,infra
+nomina-batch,Nómina Batch,infra
+tesoreria-api,Tesorería API,infra
+onboarding,Onboarding,infra
+notificaciones,Notificaciones,infra

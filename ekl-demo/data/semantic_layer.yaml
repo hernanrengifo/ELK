@@ -1,0 +1,31 @@
+# semantic_layer.yaml — capa semántica de la demo EKL (plan_demo.md §3.3)
+#
+# Estas definiciones son la fuente de verdad para las métricas de negocio.
+# El agente NUNCA calcula estas cifras por su cuenta: siempre las resuelve
+# vía la acción `retrieve_customer_position` / `resolve_metric` (sesión 2),
+# que lee esta definición y ejecuta el SQL contra DuckDB
+# (data/posiciones.csv).
+#
+# Momento "wow" #1 (guion, plan_demo.md §5, minuto 7-8): cambiar
+# `exposicion_crediticia` a version: 3 (por ejemplo, excluyendo el cupo no
+# utilizado) y repetir la pregunta hilo conductor: la lista de clientes
+# afectados cambia sin tocar prompt ni código.
+
+metricas:
+  exposicion_crediticia:
+    version: 2
+    owner: Riesgo
+    definicion: >-
+      Saldo dispuesto + cupo no utilizado comprometido, en COP,
+      a fecha de corte
+    sql: >-
+      SELECT SUM(saldo_dispuesto + cupo_comprometido)
+      FROM posiciones
+      WHERE cliente_id = ?
+        AND fecha = (SELECT MAX(fecha) FROM posiciones)
+
+  cliente_activo:
+    version: 1
+    owner: Riesgo
+    definicion: "Cliente con al menos una transacción en los últimos 90 días"
+    sql: null   # sin implementación en F1: no hay tabla de transacciones todavía

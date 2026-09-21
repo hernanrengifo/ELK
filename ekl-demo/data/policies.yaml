@@ -1,0 +1,36 @@
+# policies.yaml — gobernanza / RBAC de la demo EKL (plan_demo.md §3, §4.3)
+#
+# Esta política la aplica el servidor (MCP ekl_graph_server / ekl_actions_server,
+# sesión 2), nunca el modelo. En F1 solo se declara la política; su
+# aplicación (poda de resultados, denegación de acciones, eventos
+# `policy_decision`) se construye en la sesión 2.
+
+roles:
+  - direccion
+  - riesgo
+  - analista_junior
+
+# RBAC por etiqueta de nodo: qué propiedades de sensibilidad quedan
+# ocultas/podadas para qué roles. `read_cypher` (ekl_graph_server) debe
+# filtrar cualquier nodo `Cliente` con `sensibilidad: alta` fuera de la
+# lista `permitido_para`.
+node_policies:
+  Cliente:
+    sensibilidad:
+      alta:
+        permitido_para: [direccion, riesgo]
+        denegado_para: [analista_junior]
+        efecto: "podar_nodo"   # el nodo desaparece del resultado, no se enmascara
+
+# Políticas de acciones (Accion, plan_demo.md §3.2). Se declaran también
+# junto al nodo Accion en ontology.yaml; se listan aquí para que el
+# servidor de acciones (ekl_actions_server) tenga un único lugar donde
+# consultar RBAC de acciones además del RBAC de nodos.
+accion_policies:
+  retrieve_customer_position:
+    requiere_rol: [riesgo, direccion]
+    efecto_denegado: "rechazar_con_mensaje_explicable"
+
+# Rol por defecto de la demo si no se especifica ninguno (ver .env.example
+# DEMO_USER_ROLE).
+rol_por_defecto: riesgo

@@ -1,0 +1,13 @@
+id,nombre,segmento,sensibilidad
+CLI01,Textiles Andinos S.A.S.,corporativo,alta
+CLI02,Grupo Cafetero del Oriente S.A.,corporativo,normal
+CLI03,Constructora Valle Verde S.A.,corporativo,normal
+CLI04,Logística Continental S.A.S.,corporativo,normal
+CLI05,Industrias Metálicas del Cauca S.A.,corporativo,alta
+CLI06,Comercializadora Andina S.A.S.,corporativo,normal
+CLI07,Agroindustrial Sabana S.A.,corporativo,normal
+CLI08,Distribuciones del Pacífico S.A.S.,corporativo,normal
+CLI09,Panadería La Espiga SAS,pyme,normal
+CLI10,Ferretería El Tornillo Ltda,pyme,normal
+CLI11,Taller Mecánico Rodríguez,pyme,normal
+CLI12,Boutique Luna Nueva SAS,pyme,normal

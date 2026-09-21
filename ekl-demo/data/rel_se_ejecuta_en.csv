@@ -1,0 +1,7 @@
+producto_id,servicio_id
+PROD04,pagos-core
+PROD01,pagos-core
+PROD03,nomina-batch
+PROD02,tesoreria-api
+PROD05,onboarding
+PROD06,onboarding

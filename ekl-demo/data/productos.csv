@@ -1,0 +1,7 @@
+id,nombre,tipo
+PROD01,crédito rotativo,credito
+PROD02,tesorería,tesoreria
+PROD03,nómina,nomina
+PROD04,cash management,cash_management
+PROD05,CDT,inversion
+PROD06,leasing,credito

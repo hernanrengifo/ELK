@@ -1,0 +1,7 @@
+servicio_id,destino_id,destino_tipo,fuente
+pagos-core,PAY-DB-01,BaseDatos,runbook_pagos.md#L16
+pagos-core,PAY-DB-02,BaseDatos,runbook_pagos.md#L19
+nomina-batch,PAY-DB-01,BaseDatos,runbook_pagos.md#L24
+tesoreria-api,TES-DB,BaseDatos,carga_inicial
+onboarding,ONB-DB,BaseDatos,carga_inicial
+notificaciones,pagos-core,Servicio,runbook_pagos.md#L33

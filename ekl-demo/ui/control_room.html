@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKL — Sala de control</title>
+<!--
+  control_room.html — Sala de control de la demo EKL (plan_demo.md §4.8).
+
+  Página independiente servida por el trace_store en /control (puerto
+  8020), y embebida además en la pestaña "Sala de control" de la UI de
+  Streamlit. El porqué de HTML+JS en lugar de Streamlit está en
+  STATUS.md: el diagrama de secuencia vivo y la reproducción con
+  velocidad ajustable necesitan redibujar a 60 fps sobre el mismo DOM,
+  y el modelo de Streamlit (rerun completo del script) no lo permite sin
+  parpadeo.
+
+  Fuentes de datos, todas del trace_store:
+    GET /runs                 selector de corridas (+ las de referencia)
+    GET /runs/<id>            reproducción de una corrida guardada
+    GET /stream?run_id=<id>   SSE en vivo mientras el agente trabaja
+    GET /runs/<id>/export     exportar trace.jsonl
+
+  No necesita ni LLM ni agentes para reproducir: con un trace.jsonl
+  guardado basta (§8, plan B).
+-->
+<style>
+  :root{
+    --fondo:#0f1219; --panel:#161b26; --panel2:#1c2231; --borde:#2a3244;
+    --texto:#e6e9f0; --tenue:#8b93a7; --tenue2:#5d6478;
+    --mcp:#4a9eff; --a2a:#f5a524; --rojo:#f2545b; --verde:#39c17f;
+    --morado:#a78bfa; --carril:#232b3d;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--fondo);color:var(--texto);
+       font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:10px 16px;
+         background:var(--panel);border-bottom:1px solid var(--borde);flex-wrap:wrap}
+  header h1{font-size:14px;margin:0;font-weight:600;letter-spacing:.3px}
+  header h1 span{color:var(--tenue);font-weight:400}
+  .crece{flex:1}
+  select,button,input[type=range]{background:var(--panel2);color:var(--texto);
+    border:1px solid var(--borde);border-radius:6px;padding:5px 9px;font-size:12px;font-family:inherit}
+  button{cursor:pointer}
+  button:hover{border-color:var(--mcp)}
+  button.activo{background:var(--mcp);border-color:var(--mcp);color:#06101f;font-weight:600}
+  button:disabled{opacity:.4;cursor:default}
+  label{font-size:11px;color:var(--tenue);display:inline-flex;align-items:center;gap:5px}
+  a{color:var(--mcp)}
+
+  #cuerpo{display:grid;grid-template-columns:minmax(420px,1.25fr) minmax(360px,1fr);
+          gap:10px;padding:10px;height:calc(100vh - 92px)}
+  @media (max-width:1100px){#cuerpo{grid-template-columns:1fr;height:auto}}
+  .zona{background:var(--panel);border:1px solid var(--borde);border-radius:9px;
+        display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .zona > h2{margin:0;padding:8px 12px;font-size:11px;text-transform:uppercase;
+             letter-spacing:.9px;color:var(--tenue);border-bottom:1px solid var(--borde);
+             display:flex;align-items:center;gap:8px}
+  .zona > h2 .contador{margin-left:auto;color:var(--tenue2);text-transform:none;letter-spacing:0}
+  .contenido{overflow:auto;padding:10px 12px;flex:1;min-height:0}
+  #derecha{display:grid;grid-template-rows:1.15fr .85fr .7fr;gap:10px;min-height:0}
+  @media (max-width:1100px){#derecha{grid-template-rows:none}
+    #derecha .zona{max-height:380px}
+    #zonaSecuencia{height:520px}}
+
+  /* --- 1. Diagrama de secuencia vivo --- */
+  #secuenciaWrap{position:relative;flex:1;overflow:auto;min-height:0}
+  #carriles{position:sticky;top:0;z-index:3;display:flex;background:var(--panel);
+            border-bottom:1px solid var(--borde)}
+  #carriles div{flex:1;text-align:center;font-size:10px;padding:6px 2px;color:var(--tenue);
+                border-right:1px solid var(--borde);line-height:1.25}
+  #carriles div:last-child{border-right:none}
+  #carriles div b{display:block;color:var(--texto);font-size:11px;font-weight:600}
+  #lienzo{position:relative;min-height:100%}
+  .fondoCarril{position:absolute;top:0;bottom:0;width:1px;background:var(--carril)}
+  .flecha{position:absolute;height:22px;cursor:pointer}
+  .flecha .linea{position:absolute;top:11px;height:2px;border-radius:2px}
+  .flecha .punta{position:absolute;top:6px;width:0;height:0;
+                 border-top:6px solid transparent;border-bottom:6px solid transparent}
+  .flecha .etiqueta{position:absolute;top:-3px;font-size:10px;white-space:nowrap;
+                    background:var(--fondo);padding:0 5px;border-radius:3px}
+  .flecha.propia .linea{border-radius:0}
+  .flecha:hover .etiqueta{background:var(--panel2);color:#fff}
+  .flecha.anidada .etiqueta{font-style:italic}
+  .flecha.atenuada{opacity:.18}
+  .flecha.nueva{animation:entra .45s ease-out}
+  @keyframes entra{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}
+  .marcaIteracion{position:absolute;left:0;right:0;border-top:1px dashed var(--borde);
+                  font-size:9px;color:var(--tenue2);padding-left:6px}
+
+  /* --- 2. Cadena de razonamiento --- */
+  .tarjeta{background:var(--panel2);border:1px solid var(--borde);border-left:3px solid var(--mcp);
+           border-radius:7px;padding:8px 10px;margin-bottom:7px}
+  .tarjeta.deB{margin-left:22px;border-left-color:var(--a2a);background:#1a1c26}
+  .tarjeta .cab{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--tenue)}
+  .tarjeta .cab b{color:var(--texto);font-size:12px}
+  .tarjeta .cab .der{margin-left:auto;color:var(--tenue2);font-size:10px}
+  .tarjeta .razon{margin:4px 0 0;color:#cfd5e4}
+  .tarjeta .deci{margin-top:4px;color:var(--verde);font-size:11.5px}
+  .tarjeta.critico{border-left-color:var(--morado)}
+  .tarjeta.refin{border-left-color:var(--rojo)}
+  .tarjeta.resp{border-left-color:var(--verde)}
+  .anidadoAviso{font-size:10px;color:var(--a2a);margin:0 0 5px 22px}
+
+  /* --- 3. Plan y nodo crítico --- */
+  .sub{display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid #1e2534}
+  .sub:last-child{border-bottom:none}
+  .pill{font-size:9.5px;padding:2px 7px;border-radius:9px;white-space:nowrap}
+  .pendiente{background:#2a3244;color:var(--tenue)}
+  .en_curso{background:#2c3a52;color:var(--mcp)}
+  .resuelta{background:#16382a;color:var(--verde)}
+  .delegada{background:#3a2e14;color:var(--a2a)}
+  .hueco{background:#3a1d20;border:1px solid #5a2a2f;border-radius:6px;padding:6px 9px;
+         margin-top:6px;color:#ffb4b8;font-size:11.5px}
+  .directiva{background:#1d2a3a;border:1px solid #2f4a68;border-radius:6px;padding:6px 9px;
+             margin-top:6px;color:#bcd9ff;font-size:11.5px}
+
+  /* --- 4. Gobernanza --- */
+  #gobernanza{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:7px}
+  .metrica{background:var(--panel2);border:1px solid var(--borde);border-radius:7px;padding:7px 9px}
+  .metrica .v{font-size:17px;font-weight:600;line-height:1.15}
+  .metrica .k{font-size:9.5px;color:var(--tenue);text-transform:uppercase;letter-spacing:.5px}
+  .metrica.alerta .v{color:var(--rojo)}
+  .metrica.ok .v{color:var(--verde)}
+
+  /* --- comparación de dos runs --- */
+  body.comparando #cuerpo{grid-template-columns:1fr 1fr}
+  body.comparando #derecha{display:none}
+  #panelComparar{display:none}
+  body.comparando #panelComparar{display:flex}
+  .difTabla{width:100%;border-collapse:collapse;font-size:11.5px}
+  .difTabla th,.difTabla td{padding:5px 7px;border-bottom:1px solid #1e2534;text-align:left}
+  .difTabla th{color:var(--tenue);font-weight:500;font-size:10px;text-transform:uppercase}
+  .difTabla td.dif{color:var(--a2a);font-weight:600}
+
+  /* --- detalle de una flecha --- */
+  #detalle{position:fixed;right:14px;bottom:14px;width:min(560px,92vw);max-height:62vh;
+           background:var(--panel);border:1px solid var(--borde);border-radius:9px;
+           display:none;flex-direction:column;box-shadow:0 12px 40px rgba(0,0,0,.55);z-index:20}
+  #detalle.abierto{display:flex}
+  #detalle h3{margin:0;padding:9px 12px;font-size:12px;border-bottom:1px solid var(--borde);
+              display:flex;align-items:center;gap:8px}
+  #detalle pre{margin:0;padding:11px;overflow:auto;font-size:11px;line-height:1.45;
+               color:#cfd5e4;white-space:pre-wrap;word-break:break-word}
+  .vacio{color:var(--tenue2);font-style:italic;padding:14px 0;text-align:center}
+  .chip{font-size:9.5px;padding:2px 6px;border-radius:4px;background:var(--panel2);
+        border:1px solid var(--borde);color:var(--tenue)}
+  #estado{font-size:11px;color:var(--tenue)}
+  #estado.vivo{color:var(--verde)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>EKL <span>· Sala de control</span></h1>
+
+  <label>run
+    <select id="selRun"></select>
+  </label>
+  <button id="btnVivo" title="Seguir la corrida en vivo por SSE">● en vivo</button>
+
+  <span class="crece"></span>
+
+  <button id="btnPlay" title="Reproducir la corrida paso a paso">▶ reproducir</button>
+  <label>velocidad <input type="range" id="velocidad" min="0" max="4" step="1" value="2"
+         style="width:88px"><span id="velTxt" class="chip">1×</span></label>
+
+  <label>fuente <select id="filtroFuente"><option value="">todas</option></select></label>
+  <label>tipo <select id="filtroTipo"><option value="">todos</option></select></label>
+
+  <button id="btnComparar" title="Comparar esta corrida con otra">⇋ comparar</button>
+  <select id="selRunB" style="display:none"></select>
+  <button id="btnExportar" title="Descargar trace.jsonl de esta corrida">⤓ trace.jsonl</button>
+  <span id="estado">—</span>
+</header>
+
+<div id="cuerpo">
+  <!-- ZONA 1: diagrama de secuencia vivo -->
+  <section class="zona" id="zonaSecuencia">
+    <h2>1 · Secuencia
+      <span class="chip" style="color:var(--mcp)">■ MCP</span>
+      <span class="chip" style="color:var(--a2a)">■ A2A</span>
+      <span class="chip" style="color:var(--rojo)">■ podado/denegado</span>
+      <span class="chip" style="color:var(--verde)">■ respuesta</span>
+      <span class="contador" id="contSec">0 flechas</span>
+    </h2>
+    <div id="secuenciaWrap">
+      <div id="carriles"></div>
+      <div id="lienzo"></div>
+    </div>
+  </section>
+
+  <!-- comparación lado a lado -->
+  <section class="zona" id="panelComparar">
+    <h2>Comparación de corridas <span class="contador" id="contCmp"></span></h2>
+    <div class="contenido"><div id="cmpCuerpo"></div></div>
+  </section>
+
+  <div id="derecha">
+    <!-- ZONA 2: cadena de razonamiento -->
+    <section class="zona">
+      <h2>2 · Cadena de razonamiento <span class="contador" id="contRaz">0 pasos</span></h2>
+      <div class="contenido" id="razonamiento"></div>
+    </section>
+
+    <!-- ZONA 3: plan y nodo crítico -->
+    <section class="zona">
+      <h2>3 · Plan y nodo crítico <span class="contador" id="contIter">iteración 0</span></h2>
+      <div class="contenido" id="plan"></div>
+    </section>
+
+    <!-- ZONA 4: gobernanza en vivo -->
+    <section class="zona">
+      <h2>4 · Gobernanza en vivo</h2>
+      <div class="contenido"><div id="gobernanza"></div></div>
+    </section>
+  </div>
+</div>
+
+<div id="detalle">
+  <h3><span id="detTitulo"></span><span style="margin-left:auto"><button onclick="cerrarDetalle()">✕</button></span></h3>
+  <pre id="detCuerpo"></pre>
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- carriles
+// El orden es el del §4.8. `Datos` no emite eventos propios: sus marcas se
+// derivan del linaje que reportan los servidores MCP (ver dibujarFlechas).
+const CARRILES = [
+  {id:"usuario",     nombre:"Usuario",     sub:"pregunta y respuesta"},
+  {id:"agent_a",     nombre:"Agente A",    sub:"Orquestador de Negocio"},
+  {id:"mcp_graph",   nombre:"MCP graph",   sub:"grafo gobernado"},
+  {id:"mcp_actions", nombre:"MCP actions", sub:"acciones + capa semántica"},
+  {id:"agent_b",     nombre:"Agente B",    sub:"Infraestructura y TI"},
+  {id:"datos",       nombre:"Datos",       sub:"DuckDB · Neo4j"},
+];
+const IDX = Object.fromEntries(CARRILES.map((c,i)=>[c.id,i]));
+const VELOCIDADES = [0.25, 0.5, 1, 2, 4];
+
+// Precio estimado por millón de tokens (USD). Solo para la zona de
+// gobernanza; se marca como estimado en la propia tarjeta.
+const PRECIOS = {
+  "claude-opus":   {in: 15,   out: 75},
+  "claude-sonnet": {in: 3,    out: 15},
+  "claude-haiku":  {in: 0.80, out: 4},
+  "fake":          {in: 0,    out: 0},
+};
+
+let eventos = [];        // todos los de la corrida seleccionada
+let mostrados = 0;       // cuántos se están pintando (reproducción)
+let flechas = [];
+let sse = null;
+let timerPlay = null;
+let runActual = null;
+let detalleAbierto = null;
+
+const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t ?? "").replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+// Las etiquetas van sobre los carriles: una larga tapa al vecino. Se
+// recorta para pintar y el nombre completo queda en el tooltip.
+const corta = (t, n=24) => {
+  const s = String(t ?? "");
+  return s.length <= n ? s : s.slice(0, n-1) + "…";
+};
+
+// ---------------------------------------------------------------- arranque
+function pintarCarriles(){
+  $("#carriles").innerHTML = CARRILES.map(c =>
+    `<div><b>${c.nombre}</b>${c.sub}</div>`).join("");
+}
+
+async function cargarRuns(){
+  const r = await fetch("runs").then(r=>r.json()).catch(()=>({detalle:[]}));
+  const detalle = (r.detalle || []).slice().reverse();
+  const opciones = detalle.map(d => {
+    const etq = d.referencia ? "★ " : "";
+    const q = d.query ? ` · ${d.query.slice(0,42)}…` : "";
+    return `<option value="${esc(d.run_id)}">${etq}${esc(d.run_id)} · ${d.rol||"?"} · ${d.eventos} ev${esc(q)}</option>`;
+  }).join("");
+  $("#selRun").innerHTML = opciones || `<option value="">(sin corridas)</option>`;
+  $("#selRunB").innerHTML = `<option value="">— elige la segunda —</option>` + opciones;
+  if (detalle.length && !runActual) seleccionarRun(detalle[0].run_id);
+}
+
+async function seleccionarRun(runId){
+  pararVivo(); pararPlay();
+  runActual = runId;
+  $("#selRun").value = runId;
+  const r = await fetch(`runs/${encodeURIComponent(runId)}`).then(r=>r.json()).catch(()=>null);
+  eventos = r && r.eventos ? r.eventos : [];
+  mostrados = eventos.length;         // al cargar, se ve la corrida entera
+  poblarFiltros();
+  render();
+  estado(`${eventos.length} eventos · ${runId}`, false);
+}
+
+// ---------------------------------------------------------------- filtros
+function poblarFiltros(){
+  const fuentes = [...new Set(eventos.map(e=>e.source))].sort();
+  const tipos   = [...new Set(eventos.map(e=>e.kind))].sort();
+  const mantener = (sel, vals) => {
+    const previo = sel.value;
+    sel.innerHTML = `<option value="">todas</option>` +
+      vals.map(v=>`<option value="${v}">${v}</option>`).join("");
+    if (vals.includes(previo)) sel.value = previo;
+  };
+  mantener($("#filtroFuente"), fuentes);
+  mantener($("#filtroTipo"), tipos);
+}
+const pasaFiltro = (e) => {
+  const f = $("#filtroFuente").value, t = $("#filtroTipo").value;
+  return (!f || e.source === f) && (!t || e.kind === t);
+};
+
+// ------------------------------------------------- derivación de flechas
+// Una flecha por evento que cruza un límite. Los eventos de servidor
+// (mcp_*) no dicen quién los llamó, así que las flechas se derivan de los
+// eventos del lado cliente (`lado: "cliente"`), que conocen los dos
+// extremos; los del servidor aportan la política y la latencia.
+function derivarFlechas(hasta){
+  const out = [];
+  let iteracion = 0;
+  const pendientes = new Map();   // herramienta -> índice de la flecha de ida
+
+  const visibles = eventos.slice(0, hasta);
+
+  // La pregunta del usuario abre la secuencia aunque su evento (`plan`)
+  // llegue después del primer get_schema: cronológicamente es correcto,
+  // pero el diagrama se lee de arriba abajo y la pregunta es el origen.
+  const evPlan = visibles.find(e => e.kind === "plan" && (e.payload||{}).query);
+  if (evPlan){
+    out.push({ev:evPlan, iteracion:0, anidada:false, de:"usuario", a:"agent_a",
+              color:"var(--verde)", etiqueta:"pregunta", detalle:evPlan.payload.query});
+  }
+
+  for (const e of visibles){
+    const p = e.payload || {};
+    const meta = e.meta || {};
+    if (typeof meta.iteration === "number" && e.source === "agent_a") {
+      iteracion = Math.max(iteracion, meta.iteration);
+    }
+    const base = {ev:e, iteracion, anidada: !!meta.a2a_task_id};
+
+    if (e.kind === "plan"){ continue; }   // ya se dibujó arriba
+    if (e.kind === "tool_call" && p.lado === "cliente"){
+      const destino = p.servidor === "ekl-actions" ? "mcp_actions" : "mcp_graph";
+      pendientes.set(`${e.source}|${p.herramienta}`, out.length);
+      out.push({...base, de:e.source, a:destino, color:"var(--mcp)",
+                etiqueta:p.herramienta, detalle:p.argumentos});
+      continue;
+    }
+    if (e.kind === "tool_result" && p.lado === "cliente"){
+      const origen = p.servidor === "ekl-actions" ? "mcp_actions" : "mcp_graph";
+      const error = p.estado === "error";
+      const podado = (p.nodos_filtrados || []).length > 0;
+      out.push({...base, de:origen, a:e.source,
+                color: error ? "var(--rojo)" : (podado ? "var(--rojo)" : "var(--verde)"),
+                etiqueta: error ? `error: ${p.herramienta}`
+                        : podado ? `${p.herramienta} (podado ${p.nodos_filtrados.length})`
+                        : p.herramienta,
+                punteada: !error && !podado,
+                detalle: error ? p.error : p.resumen});
+      continue;
+    }
+    // El carril "Datos": derivado del linaje que reporta el servidor MCP,
+    // no de un evento propio (la capa de datos no está instrumentada).
+    if (e.kind === "tool_result" && !p.lado && p.estado === "ok"){
+      const fuente = fuenteDeDatos(e);
+      if (fuente){
+        const carril = e.source === "mcp_actions" ? "mcp_actions" : "mcp_graph";
+        out.push({...base, de:carril, a:"datos", color:"var(--tenue2)",
+                  etiqueta:fuente, punteada:true, derivada:true, detalle:p.resumen});
+      }
+      continue;
+    }
+    if (e.kind === "policy_decision" && (p.resultado === "podado" || p.resultado === "denegado")){
+      const carril = e.source === "mcp_actions" ? "mcp_actions" : "mcp_graph";
+      out.push({...base, de:carril, a:carril, color:"var(--rojo)", propia:true,
+                etiqueta:`política: ${p.resultado}`, detalle:p});
+      continue;
+    }
+    if (e.kind === "a2a_request" && e.source === "agent_a"){
+      out.push({...base, de:"agent_a", a:"agent_b", color:"var(--a2a)",
+                etiqueta:`A2A ${p.skill}`, detalle:p});
+      continue;
+    }
+    if (e.kind === "a2a_response" && e.source === "agent_b"){
+      out.push({...base, de:"agent_b", a:"agent_a", color:"var(--verde)",
+                etiqueta:"contrato + linaje", detalle:p.contrato});
+      continue;
+    }
+    if (e.kind === "answer"){
+      out.push({...base, de:"agent_a", a:"usuario", color:"var(--verde)",
+                etiqueta:"respuesta con evidencia", detalle:p});
+      continue;
+    }
+    if (e.kind === "error" && (e.source === "agent_a" || e.source === "agent_b")){
+      out.push({...base, de:e.source, a:e.source, color:"var(--rojo)", propia:true,
+                etiqueta:`error en ${e.step||"?"}`, detalle:p});
+    }
+  }
+  return out;
+}
+
+function fuenteDeDatos(e){
+  const r = (e.payload||{}).resumen;
+  const txt = typeof r === "string" ? r : JSON.stringify(r||"");
+  if (/posiciones\.csv|DuckDB/i.test(txt)) return "DuckDB · posiciones.csv";
+  if (e.source === "mcp_graph" && /"filas"|"nodos"/.test(txt)) return "grafo";
+  return null;
+}
+
+// ---------------------------------------------------------------- render 1
+function dibujarSecuencia(){
+  flechas = derivarFlechas(mostrados);
+  const lienzo = $("#lienzo");
+  const ancho = $("#secuenciaWrap").clientWidth || 700;
+  const paso = ancho / CARRILES.length;
+  const x = (id) => paso * (IDX[id] + 0.5);
+
+  let html = CARRILES.map((c,i)=>
+    `<div class="fondoCarril" style="left:${paso*(i+0.5)}px"></div>`).join("");
+
+  let y = 16, iterPintada = -1;
+  let visibles = 0;
+  flechas.forEach((f, i) => {
+    if (!pasaFiltro(f.ev)) { return; }
+    visibles++;
+    if (f.iteracion !== iterPintada && f.iteracion > 0){
+      iterPintada = f.iteracion;
+      html += `<div class="marcaIteracion" style="top:${y-6}px">iteración ${f.iteracion}</div>`;
+      y += 12;
+    }
+    const x1 = x(f.de), x2 = x(f.a);
+    const nueva = (i >= flechas.length - 1 && sse) ? " nueva" : "";
+    if (f.propia){
+      html += `<div class="flecha propia${nueva}" data-i="${i}" style="left:${x1-26}px;top:${y}px;width:52px">
+        <div class="linea" style="left:0;width:52px;background:${f.color};
+             border-top:2px dashed ${f.color};height:0"></div>
+        <div class="etiqueta" title="${esc(f.etiqueta)}" style="left:56px;color:${f.color}">${esc(corta(f.etiqueta))}</div></div>`;
+    } else {
+      const izq = Math.min(x1,x2), ancho2 = Math.abs(x2-x1);
+      const derecha = x2 > x1;
+      html += `<div class="flecha${f.anidada?" anidada":""}${nueva}" data-i="${i}"
+                    style="left:${izq}px;top:${y}px;width:${ancho2}px">
+        <div class="linea" style="left:0;width:${ancho2}px;background:${f.color};
+             ${f.punteada?`background:repeating-linear-gradient(90deg,${f.color} 0 6px,transparent 6px 11px)`:""}"></div>
+        <div class="punta" style="${derecha?`right:0;border-left:8px solid ${f.color}`
+                                          :`left:0;border-right:8px solid ${f.color}`}"></div>
+        <div class="etiqueta" title="${esc(f.etiqueta)}"
+             style="${derecha?`left:6px`:`right:6px`};color:${f.color}">
+          ${f.anidada?"↳ ":""}${esc(corta(f.etiqueta))}</div></div>`;
+    }
+    y += 26;
+  });
+
+  lienzo.style.height = Math.max(y + 20, 200) + "px";
+  lienzo.innerHTML = html;
+  lienzo.querySelectorAll(".flecha").forEach(el =>
+    el.onclick = () => abrirDetalle(flechas[+el.dataset.i]));
+  $("#contSec").textContent = `${visibles} flecha${visibles===1?"":"s"}`;
+  if (sse) $("#secuenciaWrap").scrollTop = $("#secuenciaWrap").scrollHeight;
+}
+
+// ---------------------------------------------------------------- render 2
+function dibujarRazonamiento(){
+  const cont = $("#razonamiento");
+  const vis = eventos.slice(0, mostrados).filter(pasaFiltro);
+  let html = "", ultimoTask = null, pasos = 0;
+
+  for (const e of vis){
+    const p = e.payload || {}, m = e.meta || {};
+    const deB = e.source === "agent_b";
+    if (deB && m.a2a_task_id && m.a2a_task_id !== ultimoTask){
+      ultimoTask = m.a2a_task_id;
+      html += `<p class="anidadoAviso">↳ pasos del Agente B bajo la flecha A2A ${esc(m.a2a_task_id)}</p>`;
+    }
+    const dur = m.duracion_ms != null ? `${Math.round(m.duracion_ms)} ms` : "";
+    const tok = (m.tokens_in || m.tokens_out)
+      ? ` · ${m.tokens_in||0}→${m.tokens_out||0} tok` : "";
+
+    if (e.kind === "thought"){
+      pasos++;
+      html += `<div class="tarjeta${deB?" deB":""}${e.step==="nodo_critico"?" critico":""}${e.step==="responder"?" resp":""}">
+        <div class="cab"><b>${esc(e.step)}</b>
+          <span>${esc(e.source)}</span>
+          ${m.iteration ? `<span class="chip">it. ${m.iteration}</span>`:""}
+          <span class="der">${dur}${tok}</span></div>
+        <p class="razon">${esc(p.razonamiento)}</p>
+        <p class="deci">→ ${esc(p.decision)}</p></div>`;
+    } else if (e.kind === "critic_verdict"){
+      pasos++;
+      const ok = p.is_complete === true;
+      const fase = p.fase === "verificacion" ? "verificación de la respuesta" : "suficiencia";
+      const veredicto = p.fase === "verificacion"
+        ? (p.respuesta_valida ? "respuesta aprobada" : "respuesta RECHAZADA")
+        : (ok ? "ruta completa" : "ruta incompleta");
+      html += `<div class="tarjeta critico">
+        <div class="cab"><b>nodo_critico</b><span>${esc(fase)}</span>
+          <span class="der">${dur}</span></div>
+        <p class="razon" style="color:${ok||p.respuesta_valida?"var(--verde)":"var(--rojo)"}">
+          ${esc(veredicto)}</p>
+        ${(p.cifras_sin_linaje||[]).length
+          ? `<p class="deci" style="color:var(--rojo)">cifras sin linaje: ${esc((p.cifras_sin_linaje||[]).join(", "))}</p>`:""}
+        ${p.motivo_corte ? `<p class="deci" style="color:var(--a2a)">corte: ${esc(p.motivo_corte)}</p>`:""}
+      </div>`;
+    } else if (e.kind === "refinement"){
+      pasos++;
+      html += `<div class="tarjeta refin">
+        <div class="cab"><b>refinamiento</b>
+          <span>→ ${esc(p.nodo_destino||p.fase||"")}</span>
+          <span class="der">it. ${esc(p.iteration_siguiente||"")}</span></div>
+        <p class="razon">${esc(p.directiva)}</p></div>`;
+    } else if (e.kind === "answer"){
+      pasos++;
+      html += `<div class="tarjeta resp">
+        <div class="cab"><b>respuesta</b><span class="der">${dur}</span></div>
+        <p class="razon" style="white-space:pre-wrap">${esc((p.respuesta||"").slice(0,700))}</p></div>`;
+    }
+  }
+  cont.innerHTML = html || `<div class="vacio">sin pasos de razonamiento todavía</div>`;
+  $("#contRaz").textContent = `${pasos} paso${pasos===1?"":"s"}`;
+}
+
+// ---------------------------------------------------------------- render 3
+function dibujarPlan(){
+  const vis = eventos.slice(0, mostrados);
+  const ultimoPlan = [...vis].reverse().find(e => e.kind === "plan");
+  const veredictos = vis.filter(e => e.kind === "critic_verdict");
+  const ultimoVer = veredictos[veredictos.length-1];
+  const refin = vis.filter(e => e.kind === "refinement");
+  const iter = Math.max(0, ...vis.map(e => (e.meta||{}).iteration || 0));
+
+  // El plan sale del evento `plan`; su estado en vivo, de lo que el
+  // crítico dice que sigue abierto.
+  const abiertos = new Set(((ultimoVer||{}).payload||{}).huecos || []);
+  let html = "";
+  if (ultimoPlan){
+    for (const s of (ultimoPlan.payload.subpreguntas || [])){
+      const sigueAbierta = [...abiertos].some(h => String(h).startsWith(s.id));
+      const est = sigueAbierta ? "en_curso" : (s.estado === "pendiente" && iter>0 ? "resuelta" : s.estado);
+      html += `<div class="sub"><span class="pill ${est}">${esc(est)}</span>
+        <span class="chip">${esc(s.id)}</span>
+        <span>${esc(s.pregunta)}</span>
+        <span style="margin-left:auto" class="chip">${esc(s.dominio)}</span></div>`;
+    }
+  } else {
+    html = `<div class="vacio">el planner todavía no ha descompuesto la pregunta</div>`;
+  }
+
+  for (const h of ((ultimoVer||{}).payload||{}).huecos || []){
+    html += `<div class="hueco">hueco: ${esc(h)}</div>`;
+  }
+  const ultRef = refin[refin.length-1];
+  if (ultRef){
+    const vigente = !ultimoVer || ultimoVer.seq < ultRef.seq;
+    html += `<div class="directiva"><b>${vigente ? "directiva de refinamiento vigente"
+      : `última directiva emitida (iteración ${esc(ultRef.payload.iteration_siguiente||"")})`}:</b>
+      ${esc(ultRef.payload.directiva)}</div>`;
+  }
+  const corte = vis.map(e=>(e.payload||{}).motivo_corte).filter(Boolean).pop();
+  if (corte) html += `<div class="hueco">corte del bucle: ${esc(corte)}</div>`;
+
+  $("#plan").innerHTML = html;
+  $("#contIter").textContent = `iteración ${iter}`;
+}
+
+// ---------------------------------------------------------------- render 4
+function dibujarGobernanza(){
+  const vis = eventos.slice(0, mostrados);
+  const llamadasMCP = vis.filter(e => e.kind === "tool_call" && (e.payload||{}).lado === "cliente").length;
+  const a2a = vis.filter(e => e.kind === "a2a_request" && e.source === "agent_a").length;
+  const podados = new Set();
+  let denegadas = 0;
+  for (const e of vis){
+    if (e.kind !== "policy_decision") continue;
+    const p = e.payload || {};
+    (p.nodos_podados || []).forEach(n => podados.add(n));
+    if (p.resultado === "denegado") denegadas++;
+  }
+  const tIn = vis.reduce((a,e)=>a+((e.meta||{}).tokens_in||0),0);
+  const tOut = vis.reduce((a,e)=>a+((e.meta||{}).tokens_out||0),0);
+  const modelo = (vis.find(e=>(e.meta||{}).modelo)||{meta:{}}).meta.modelo || "—";
+  const lat = vis.length >= 2
+    ? (new Date(vis[vis.length-1].ts) - new Date(vis[0].ts)) / 1000 : 0;
+
+  const clave = Object.keys(PRECIOS).find(k => String(modelo).startsWith(k)) || "fake";
+  const precio = PRECIOS[clave];
+  const costo = (tIn/1e6)*precio.in + (tOut/1e6)*precio.out;
+
+  const m = (v,k,cls="") => `<div class="metrica ${cls}"><div class="v">${v}</div><div class="k">${k}</div></div>`;
+  $("#gobernanza").innerHTML =
+    m(llamadasMCP, "llamadas MCP") +
+    m(a2a, "tareas A2A") +
+    m(podados.size, "nodos filtrados", podados.size ? "alerta" : "") +
+    m(denegadas, "acciones denegadas", denegadas ? "alerta" : "") +
+    m(lat.toFixed(1)+" s", "latencia") +
+    m((tIn+tOut).toLocaleString("es"), "tokens") +
+    m(modelo === "fake" ? "$0.00" : "$"+costo.toFixed(4), "costo estimado",
+      modelo === "fake" ? "ok" : "") +
+    `<div class="metrica"><div class="v" style="font-size:12px">${esc(modelo)}</div>
+       <div class="k">modelo</div></div>`;
+}
+
+function render(){
+  dibujarSecuencia(); dibujarRazonamiento(); dibujarPlan(); dibujarGobernanza();
+  if (document.body.classList.contains("comparando")) dibujarComparacion();
+}
+
+// ---------------------------------------------------------------- detalle
+function abrirDetalle(f){
+  if (!f) return;
+  detalleAbierto = f;
+  $("#detTitulo").innerHTML =
+    `<b>${esc(f.ev.kind)}</b> · ${esc(f.ev.source)} → ${esc(f.a)} · seq ${f.ev.seq}
+     <span class="chip">${esc(f.ev.step||"")}</span>` +
+    (f.derivada ? ` <span class="chip" title="Esta flecha se deriva del linaje que reporta el servidor MCP: la capa de datos no emite eventos propios">derivada</span>` : "");
+  const cuerpo = {
+    seq: f.ev.seq, ts: f.ev.ts, source: f.ev.source, kind: f.ev.kind,
+    step: f.ev.step, meta: f.ev.meta, payload: f.ev.payload,
+  };
+  $("#detCuerpo").textContent = JSON.stringify(cuerpo, null, 2);
+  $("#detalle").classList.add("abierto");
+}
+function cerrarDetalle(){ $("#detalle").classList.remove("abierto"); detalleAbierto = null; }
+
+// ---------------------------------------------------------------- en vivo
+function estado(txt, vivo){
+  $("#estado").textContent = txt;
+  $("#estado").className = vivo ? "vivo" : "";
+}
+function pararVivo(){
+  if (sse){ sse.close(); sse = null; }
+  $("#btnVivo").classList.remove("activo");
+}
+function alternarVivo(){
+  if (sse){ pararVivo(); estado("en vivo detenido", false); return; }
+  pararPlay();
+  eventos = []; mostrados = 0; render();
+  const run = $("#selRun").value;
+  // Sin run_id se sigue todo lo que pase: es el modo "proyectar y esperar
+  // a que alguien lance una pregunta".
+  const url = run && !run.startsWith("referencia:")
+    ? `stream?run_id=${encodeURIComponent(run)}&replay=true` : "stream";
+  sse = new EventSource(url);
+  sse.onmessage = (m) => {
+    try {
+      const ev = JSON.parse(m.data);
+      // Si llega una corrida nueva, se cambia a ella sola.
+      if (eventos.length && ev.run_id !== eventos[0].run_id){ eventos = []; }
+      eventos.push(ev); mostrados = eventos.length;
+      poblarFiltros(); render();
+      estado(`en vivo · ${ev.run_id} · ${eventos.length} eventos`, true);
+    } catch(err){ /* una línea rota no puede tumbar la pantalla */ }
+  };
+  sse.onerror = () => estado("en vivo: reconectando…", false);
+  $("#btnVivo").classList.add("activo");
+  estado("en vivo · esperando eventos…", true);
+}
+
+// ------------------------------------------------------------ reproducir
+function pararPlay(){
+  if (timerPlay){ clearInterval(timerPlay); timerPlay = null; }
+  $("#btnPlay").textContent = "▶ reproducir";
+  $("#btnPlay").classList.remove("activo");
+}
+function alternarPlay(){
+  if (timerPlay){ pararPlay(); estado(`pausado en ${mostrados}/${eventos.length}`, false); return; }
+  if (!eventos.length) return;
+  pararVivo();
+  if (mostrados >= eventos.length) mostrados = 0;   // reiniciar si terminó
+  $("#btnPlay").textContent = "⏸ pausa";
+  $("#btnPlay").classList.add("activo");
+  const tick = () => {
+    if (mostrados >= eventos.length){ pararPlay(); estado("reproducción terminada", false); return; }
+    mostrados++;
+    render();
+    estado(`reproduciendo ${mostrados}/${eventos.length}`, false);
+  };
+  const vel = VELOCIDADES[+$("#velocidad").value];
+  timerPlay = setInterval(tick, Math.max(40, 380 / vel));
+}
+
+// -------------------------------------------------------------- comparar
+function resumenRun(evs){
+  const podados = new Set();
+  let denegadas = 0, cifras = 0;
+  for (const e of evs){
+    const p = e.payload || {};
+    if (e.kind === "policy_decision"){
+      (p.nodos_podados||[]).forEach(n=>podados.add(n));
+      if (p.resultado === "denegado") denegadas++;
+    }
+    if (e.kind === "answer") cifras = (p.evidencia||[]).filter(x=>x.tipo==="cifra").length;
+  }
+  const ans = [...evs].reverse().find(e=>e.kind==="answer");
+  const ruta = ans ? (ans.payload.ruta_nodos||[]) : [];
+  return {
+    eventos: evs.length,
+    rol: (evs.find(e=>(e.meta||{}).user_role)||{meta:{}}).meta.user_role || "—",
+    llamadasMCP: evs.filter(e=>e.kind==="tool_call" && (e.payload||{}).lado==="cliente").length,
+    a2a: evs.filter(e=>e.kind==="a2a_request" && e.source==="agent_a").length,
+    podados: [...podados].join(", ") || "—",
+    denegadas,
+    cifras,
+    nodos: ruta.length,
+    ruta: ruta.join(", ") || "—",
+    iteraciones: Math.max(0, ...evs.map(e=>(e.meta||{}).iteration||0)),
+    latencia: evs.length>=2
+      ? ((new Date(evs[evs.length-1].ts)-new Date(evs[0].ts))/1000).toFixed(1)+" s" : "—",
+  };
+}
+
+async function dibujarComparacion(){
+  const otro = $("#selRunB").value;
+  if (!otro){ $("#cmpCuerpo").innerHTML = `<div class="vacio">elige la segunda corrida arriba</div>`; return; }
+  const r = await fetch(`runs/${encodeURIComponent(otro)}`).then(r=>r.json()).catch(()=>null);
+  if (!r){ $("#cmpCuerpo").innerHTML = `<div class="vacio">no se pudo leer ${esc(otro)}</div>`; return; }
+  const A = resumenRun(eventos), B = resumenRun(r.eventos||[]);
+  const filas = [
+    ["rol","rol"],["eventos","eventos"],["iteraciones","iteraciones"],
+    ["llamadas MCP","llamadasMCP"],["tareas A2A","a2a"],
+    ["nodos filtrados por política","podados"],["acciones denegadas","denegadas"],
+    ["cifras en la evidencia","cifras"],["nodos en la ruta","nodos"],
+    ["ruta recorrida","ruta"],["latencia","latencia"],
+  ];
+  $("#cmpCuerpo").innerHTML = `<table class="difTabla">
+    <tr><th></th><th>${esc(runActual)}</th><th>${esc(otro)}</th></tr>
+    ${filas.map(([etq,k]) => {
+      const dif = String(A[k]) !== String(B[k]);
+      return `<tr><th>${etq}</th>
+        <td class="${dif?"dif":""}">${esc(A[k])}</td>
+        <td class="${dif?"dif":""}">${esc(B[k])}</td></tr>`;
+    }).join("")}</table>
+    <p style="color:var(--tenue);font-size:11px;margin-top:10px">
+      En ámbar, lo que cambia entre las dos corridas. Comparando la misma
+      pregunta con rol <code>riesgo</code> y con <code>analista_junior</code> se ve
+      que cambia el resultado sin que cambie ni el agente ni el grafo.</p>`;
+  $("#contCmp").textContent = `${A.eventos} vs ${B.eventos} eventos`;
+}
+
+function alternarComparar(){
+  const on = document.body.classList.toggle("comparando");
+  $("#selRunB").style.display = on ? "" : "none";
+  $("#btnComparar").classList.toggle("activo", on);
+  if (on) dibujarComparacion();
+}
+
+// ---------------------------------------------------------------- eventos
+$("#selRun").onchange = (e) => seleccionarRun(e.target.value);
+$("#selRunB").onchange = dibujarComparacion;
+$("#btnVivo").onclick = alternarVivo;
+$("#btnPlay").onclick = alternarPlay;
+$("#btnComparar").onclick = alternarComparar;
+$("#btnExportar").onclick = () => {
+  const run = $("#selRun").value;
+  window.location = run ? `runs/${encodeURIComponent(run)}/export` : "export";
+};
+$("#velocidad").oninput = (e) => {
+  $("#velTxt").textContent = VELOCIDADES[+e.target.value] + "×";
+  if (timerPlay){ pararPlay(); alternarPlay(); }
+};
+$("#filtroFuente").onchange = render;
+$("#filtroTipo").onchange = render;
+window.onresize = () => dibujarSecuencia();
+document.onkeydown = (e) => {
+  if (e.key === "Escape") cerrarDetalle();
+  if (e.key === " " && e.target === document.body){ e.preventDefault(); alternarPlay(); }
+};
+
+pintarCarriles();
+cargarRuns();
+setInterval(() => { if (!sse && !timerPlay) cargarRuns(); }, 8000);
+</script>
+</body>
+</html>

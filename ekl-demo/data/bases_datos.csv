@@ -1,0 +1,5 @@
+id,motor,ambiente
+PAY-DB-01,Oracle,prod
+PAY-DB-02,Oracle,prod
+TES-DB,PostgreSQL,prod
+ONB-DB,PostgreSQL,prod

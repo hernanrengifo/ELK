@@ -1,0 +1,410 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "EKL — Enterprise Knowledge Layer · arquitectura de componentes",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      560
+    ],
+    "views": [
+      {
+        "id": "pregunta",
+        "label": "Camino de la pregunta",
+        "focus": [
+          "ui",
+          "agenteA",
+          "mcpGrafoNegocio",
+          "neo4jNegocio"
+        ],
+        "note": "La pregunta entra por la UI y el Agente A recorre su propio grafo de negocio."
+      },
+      {
+        "id": "federacion",
+        "label": "Federación A2A",
+        "focus": [
+          "agenteA",
+          "agenteB",
+          "mcpGrafoInfra",
+          "neo4jInfra"
+        ],
+        "note": "Cuando el nodo es frontera, el Agente A delega en el dueño del otro dominio."
+      },
+      {
+        "id": "gobernanza",
+        "label": "Gobernanza",
+        "focus": [
+          "mcpGrafoNegocio",
+          "mcpAcciones",
+          "mcpGrafoInfra",
+          "duckdb"
+        ],
+        "note": "El RBAC y la capa semántica los aplica el servidor MCP, nunca el modelo."
+      },
+      {
+        "id": "observabilidad",
+        "label": "Observabilidad",
+        "focus": [
+          "agenteA",
+          "mcpGrafoNegocio",
+          "bus",
+          "traceStore",
+          "ui"
+        ],
+        "note": "Todo proceso emite al bus con el mismo run_id; el trace_store lo sirve por SSE."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "Claude API",
+      "sublabel": "LLM_MODEL configurable · fake sin API key",
+      "pos": [
+        630,
+        30
+      ],
+      "size": [
+        480,
+        62
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "UI Streamlit",
+      "sublabel": ":8501 · rol y pregunta",
+      "tag": "6 pestañas",
+      "pos": [
+        50,
+        150
+      ],
+      "size": [
+        240,
+        78
+      ]
+    },
+    {
+      "id": "agenteA",
+      "type": "backend",
+      "label": "Agente A · Negocio",
+      "sublabel": "LangGraph · 7 nodos · :8001",
+      "tag": "nodo crítico + refinamiento",
+      "pos": [
+        500,
+        150
+      ],
+      "size": [
+        260,
+        78
+      ]
+    },
+    {
+      "id": "agenteB",
+      "type": "backend",
+      "label": "Agente B · Infraestructura",
+      "sublabel": "LangGraph · 2 nodos · :8002",
+      "tag": "agent card + tasks/send",
+      "pos": [
+        980,
+        150
+      ],
+      "size": [
+        260,
+        78
+      ]
+    },
+    {
+      "id": "mcpGrafoNegocio",
+      "type": "backend",
+      "label": "MCP ekl-graph",
+      "sublabel": "base: negocio",
+      "tag": "poda por RBAC",
+      "pos": [
+        450,
+        300
+      ],
+      "size": [
+        260,
+        78
+      ]
+    },
+    {
+      "id": "mcpAcciones",
+      "type": "backend",
+      "label": "MCP ekl-actions",
+      "sublabel": "resolve_metric · retrieve_customer_position",
+      "tag": "verifica la política de la acción",
+      "pos": [
+        760,
+        300
+      ],
+      "size": [
+        260,
+        78
+      ]
+    },
+    {
+      "id": "mcpGrafoInfra",
+      "type": "backend",
+      "label": "MCP ekl-graph",
+      "sublabel": "base: infra",
+      "tag": "poda por RBAC",
+      "pos": [
+        1070,
+        300
+      ],
+      "size": [
+        260,
+        78
+      ]
+    },
+    {
+      "id": "neo4jNegocio",
+      "type": "database",
+      "label": "Neo4j · negocio",
+      "sublabel": "Cliente · Producto · Servicio*",
+      "pos": [
+        450,
+        440
+      ],
+      "size": [
+        260,
+        72
+      ]
+    },
+    {
+      "id": "duckdb",
+      "type": "database",
+      "label": "DuckDB",
+      "sublabel": "posiciones.csv · simula el lakehouse",
+      "pos": [
+        760,
+        440
+      ],
+      "size": [
+        260,
+        72
+      ]
+    },
+    {
+      "id": "neo4jInfra",
+      "type": "database",
+      "label": "Neo4j · infra",
+      "sublabel": "Servicio · BaseDatos · Persona · Cambio",
+      "pos": [
+        1070,
+        440
+      ],
+      "size": [
+        260,
+        72
+      ]
+    },
+    {
+      "id": "traceStore",
+      "type": "backend",
+      "label": "trace_store · Sala de control",
+      "sublabel": "trace.jsonl · SSE · /control :8020",
+      "pos": [
+        50,
+        300
+      ],
+      "size": [
+        240,
+        78
+      ]
+    },
+    {
+      "id": "bus",
+      "type": "messagebus",
+      "label": "event_bus",
+      "sublabel": "Redis Streams · seq global por run_id",
+      "pos": [
+        50,
+        440
+      ],
+      "size": [
+        240,
+        72
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "Gobernanza aplicada por el servidor · policies.yaml + semantic_layer.yaml (recarga en caliente)",
+      "wraps": [
+        "mcpGrafoNegocio",
+        "mcpAcciones",
+        "mcpGrafoInfra"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ui-ask",
+      "from": "ui",
+      "to": "agenteA",
+      "label": "POST /ask · rol del usuario",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "llm-a",
+      "from": "claude",
+      "to": "agenteA",
+      "label": "salida estructurada",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "llm-b",
+      "from": "claude",
+      "to": "agenteB",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "a2a",
+      "from": "agenteA",
+      "to": "agenteB",
+      "label": "A2A · tasks/send",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "a-grafo",
+      "from": "agenteA",
+      "to": "mcpGrafoNegocio",
+      "label": "MCP · run_id + user_ctx",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDx": -50
+    },
+    {
+      "id": "a-acciones",
+      "from": "agenteA",
+      "to": "mcpAcciones",
+      "label": "MCP · acción del grafo",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "b-grafo",
+      "from": "agenteB",
+      "to": "mcpGrafoInfra",
+      "label": "MCP · rol original",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "grafo-neo",
+      "from": "mcpGrafoNegocio",
+      "to": "neo4jNegocio",
+      "label": "Cypher solo lectura",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 51
+    },
+    {
+      "id": "acciones-duck",
+      "from": "mcpAcciones",
+      "to": "duckdb",
+      "label": "SQL de la capa semántica",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 51
+    },
+    {
+      "id": "infra-neo",
+      "from": "mcpGrafoInfra",
+      "to": "neo4jInfra",
+      "label": "Cypher solo lectura",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 51
+    },
+    {
+      "id": "a-bus",
+      "from": "agenteA",
+      "to": "bus",
+      "label": "thought · plan",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "mcp-bus",
+      "from": "mcpGrafoNegocio",
+      "to": "bus",
+      "label": "tool_call · política",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [
+        255,
+        409
+      ]
+    },
+    {
+      "id": "bus-trace",
+      "from": "bus",
+      "to": "traceStore",
+      "label": "consume el stream",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelDx": -40
+    },
+    {
+      "id": "trace-ui",
+      "from": "traceStore",
+      "to": "ui",
+      "label": "SSE en vivo",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Datos e ingesta",
+      "items": [
+        "DuckDB sobre posiciones.csv hace de lakehouse; el agente nunca ve el motor",
+        "extract_from_docs.py escribe la arista con fuente: runbook_pagos.md#L24"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Grafo e interfaces",
+      "items": [
+        "Dos grafos federados, negocio e infra, cada uno con su dueño",
+        "A2A propio: viaja la sub-pregunta, el id y la identidad — ni esquema ni credenciales"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Gobernanza",
+      "items": [
+        "El RBAC lo aplica el servidor MCP y poda antes de responder",
+        "Ninguna cifra sin linaje en evidence[]: el nodo crítico la rechaza"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Observabilidad",
+      "items": [
+        "Los cinco procesos emiten al bus con el mismo run_id (se dibujan dos flechas)",
+        "run_id y user_ctx viajan en los metadatos MCP y en el cuerpo A2A"
+      ]
+    }
+  ]
+}

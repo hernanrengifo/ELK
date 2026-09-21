@@ -1,0 +1,2 @@
+id,descripcion,fecha,ventana
+CHG-2026-0917,Migración de la base de datos del servicio de pagos (PAY-DB-01) de Oracle a PostgreSQL,2026-09-19,02:00-06:00

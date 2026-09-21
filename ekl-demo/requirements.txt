@@ -1,0 +1,37 @@
+# ekl-demo — dependencias de la demo completa (F0 a F7).
+# Ver plan_demo.md §7.
+#
+#   pip install -r requirements.txt     # ~3 min; pyarrow es lo que tarda
+
+# --- F0 / F1: datos, ontología, grafo ---------------------------------
+pyyaml>=6.0
+networkx>=3.0
+pandas>=2.0
+neo4j>=5.20          # solo necesario si vas a probar con GRAPH_BACKEND=neo4j
+pytest>=8.0
+
+# --- F2: servidores MCP (plan §4.3, §4.4) -----------------------------
+mcp>=2.0             # SDK oficial de Python. 2.x: FastMCP se llama MCPServer
+duckdb>=1.0          # capa de datos de resolve_metric / retrieve_customer_position
+pydantic>=2.7        # contratos de entrada/salida de las herramientas
+
+# --- F2b: bus de eventos y Sala de control (plan §4.8) ----------------
+fastapi>=0.110       # trace_store: SSE + ingesta, puerto 8020
+uvicorn>=0.27
+sse-starlette>=2.0
+redis>=5.0           # solo necesario con EVENT_BUS=redis
+anyio>=4.0           # ya viene con mcp; se declara porque los tests lo usan
+
+# --- F3 / F4: agentes A y B (plan §4.5, §4.6) -------------------------
+langgraph>=1.0       # grafos de estado de los dos agentes
+langchain-anthropic>=1.0   # solo si LLM_MODEL apunta a un modelo real
+httpx>=0.27          # cliente A2A (tasks/send) y agent card
+# El protocolo A2A va implementado en agents/a2a.py (subconjunto propio,
+# ver STATUS.md): no hace falta `a2a-sdk`.
+
+# --- F5 / F5b: UI y Sala de control (plan §4.7, §4.8) -----------------
+streamlit>=1.40      # ui/app.py
+streamlit-agraph>=0.0.45   # opcional: alternativa de dibujo en la pestaña Ruta
+# La Sala de control (ui/control_room.html) es HTML+JS servido por el
+# trace_store: no añade dependencias. El dibujo por defecto de la
+# pestaña Ruta es un SVG propio (ui/grafo_svg.py) — ver STATUS.md.

@@ -1,0 +1,7 @@
+id,nombre,rol,contacto
+PER01,Laura Gómez,Líder técnico pagos-core,laura.gomez@banco-demo.co
+PER02,Carlos Restrepo,Arquitecto de infraestructura,carlos.restrepo@banco-demo.co
+PER03,Marcela Duque,DBA PAY-DB-01 / PAY-DB-02,marcela.duque@banco-demo.co
+PER04,Andrés Felipe Rojas,Líder técnico nomina-batch,andres.rojas@banco-demo.co
+PER05,Juliana Torres,Líder técnico tesoreria-api,juliana.torres@banco-demo.co
+PER06,Santiago Vélez,Líder técnico onboarding y notificaciones,santiago.velez@banco-demo.co
